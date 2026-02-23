@@ -14,11 +14,11 @@ export function ClausesList({ results }: ClausesListProps) {
     <div className={styles.listContainer}>
       <div className={styles.listHeader}>
         <span className={styles.count}>{flaggedClauses.length} Flagged Clauses</span>
-        <button className={styles.filterBtn}>Filter</button>
+        <button className={styles.filterBtn}></button>
       </div>
       <div className={styles.cardsWrapper}>
         {flaggedClauses.length === 0 ? (
-          <p className={styles.emptyState}>No risky clauses detected! 🎉</p>
+          <p className={styles.emptyState}>No risky clauses detected!</p>
         ) : (
           flaggedClauses.map((clause) => (
             <ClauseCard key={clause.clause_index} clause={clause} />
