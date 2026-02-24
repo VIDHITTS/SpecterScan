@@ -1,0 +1,19 @@
+# ==========================================
+# SpecterScan Streamlit App — Dependencies
+# ==========================================
+# Run:  streamlit run app.py
+
+streamlit
+pandas
+numpy
+scikit-learn
+sentence-transformers
+spacy
+PyPDF2
+joblib
+nltk
+plotly
+
+# spaCy English model — needed for clause segmentation
+# This auto-downloads the model during pip install on Streamlit Cloud
+https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.7.1/en_core_web_sm-3.7.1-py3-none-any.whl
