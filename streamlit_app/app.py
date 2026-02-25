@@ -556,6 +556,43 @@ def extract_text_from_txt(file_bytes: bytes) -> str:
         return file_bytes.decode("latin-1")
 
 
+def extract_text_from_csv(file_bytes: bytes) -> str:
+    """Extract clause text from a CSV file.
+    
+    Expects a column named 'clause_text' (or 'cleaned_clause').
+    Falls back to the first text-like column if neither is found.
+    """
+    import csv as csv_mod
+    try:
+        text = file_bytes.decode("utf-8")
+    except UnicodeDecodeError:
+        text = file_bytes.decode("latin-1")
+
+    reader = csv_mod.DictReader(io.StringIO(text))
+    fields = reader.fieldnames or []
+
+    # pick the best column
+    col = None
+    for candidate in ("clause_text", "cleaned_clause", "text", "clause"):
+        if candidate in fields:
+            col = candidate
+            break
+    if col is None:
+        # fallback: first column whose values look like text
+        col = fields[0] if fields else None
+
+    if col is None:
+        raise ValueError("Could not determine a text column in the CSV.")
+
+    clauses = []
+    for row in reader:
+        val = (row.get(col) or "").strip()
+        if val:
+            clauses.append(val)
+
+    return "\n".join(clauses)
+
+
 def segment_into_clauses(text: str, nlp) -> list[str]:
     doc = nlp(text)
     return [sent.text.strip() for sent in doc.sents if len(sent.text.strip()) >= 5]
@@ -569,8 +606,10 @@ def analyze_document(file_bytes: bytes, filename: str, embedder, classifier, nlp
         raw_text = extract_text_from_pdf(file_bytes)
     elif ext == ".txt":
         raw_text = extract_text_from_txt(file_bytes)
+    elif ext == ".csv":
+        raw_text = extract_text_from_csv(file_bytes)
     else:
-        raise ValueError(f"Unsupported file type: '{ext}'. Upload .pdf or .txt.")
+        raise ValueError(f"Unsupported file type: '{ext}'. Upload .pdf, .txt, or .csv.")
 
     if not raw_text or not raw_text.strip():
         raise ValueError("No readable text could be extracted from the file.")
@@ -624,14 +663,14 @@ def render_upload_view(embedder, classifier, nlp):
         <div style="text-align:center; margin-bottom: 0.5rem;">
             <div class="upload-icon-circle">☁️</div>
             <h3 style="font-size:1.25rem; margin-bottom:0.5rem; color:#0f172a;">Upload Contract Document</h3>
-            <p style="color:#64748b; margin-bottom:1rem;">Drag and drop your PDF or text file here, or click to browse</p>
-            <span class="supported-formats">Supports .pdf, .txt</span>
+            <p style="color:#64748b; margin-bottom:1rem;">Drag and drop your PDF, text, or CSV file here, or click to browse</p>
+            <span class="supported-formats">Supports .pdf, .txt, .csv</span>
         </div>
         """, unsafe_allow_html=True)
 
         uploaded_file = st.file_uploader(
             "Upload contract",
-            type=["pdf", "txt"],
+            type=["pdf", "txt", "csv"],
             label_visibility="collapsed",
             key="file_uploader",
         )
@@ -671,8 +710,42 @@ def render_upload_view(embedder, classifier, nlp):
             )
 
 
+def _component_css() -> str:
+    """Return the CSS needed inside st.components.v1.html iframes."""
+    return """
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Inter', system-ui, -apple-system, sans-serif; background: transparent; color: #0f172a; }
+    .column-title { font-size: 1.05rem; padding: 1rem 1.25rem; font-weight: 600; color: #0f172a; border-bottom: 1px solid #e2e8f0; background: #f8fafc; border-radius: 12px 12px 0 0; margin: 0; }
+    .doc-viewer { background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; box-shadow: 0 1px 2px 0 rgba(0,0,0,0.05); overflow: hidden; }
+    .doc-body { padding: 1.5rem; line-height: 1.8; font-size: 1rem; color: #334155; max-height: 70vh; overflow-y: auto; }
+    .clause-normal { padding-right: 0.25rem; }
+    .clause-risky { background: #fee2e2; border-bottom: 2px solid #ef4444; padding: 0.125rem 0.25rem; border-radius: 2px; font-weight: 500; }
+    .clause-risky:hover { background: #fecaca; }
+    .doc-footer { margin-top: 2rem; padding-top: 1.5rem; border-top: 1px solid #e2e8f0; text-align: center; color: #64748b; font-size: 0.875rem; font-style: italic; }
+    .clauses-panel { background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; box-shadow: 0 1px 2px 0 rgba(0,0,0,0.05); overflow: hidden; }
+    .clauses-list-header { display: flex; justify-content: space-between; align-items: center; padding: 0.85rem 1.25rem; border-bottom: 1px solid #e2e8f0; background: #fff; }
+    .flagged-count { font-size: 0.875rem; font-weight: 600; color: #64748b; text-transform: uppercase; letter-spacing: 0.05em; }
+    .clauses-list-body { padding: 1.25rem; max-height: 66vh; overflow-y: auto; background: #f8fafc; display: flex; flex-direction: column; gap: 1.25rem; }
+    .clause-card { background: #fff; border: 1px solid #e2e8f0; border-left: 4px solid #ef4444; border-radius: 12px; box-shadow: 0 1px 2px 0 rgba(0,0,0,0.05); overflow: hidden; transition: all 0.2s; }
+    .clause-card:hover { transform: translateY(-2px); box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); }
+    .card-header { display: flex; justify-content: space-between; align-items: center; padding: 0.85rem 1.15rem; border-bottom: 1px solid #e2e8f0; background: #fafaf9; }
+    .risk-badge { display: inline-flex; align-items: center; gap: 0.375rem; padding: 0.2rem 0.7rem; border-radius: 9999px; background: #fee2e2; color: #991b1b; font-size: 0.7rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; }
+    .clause-num { display: flex; flex-direction: column; align-items: flex-end; }
+    .clause-num-label { font-size: 0.6rem; color: #64748b; text-transform: uppercase; letter-spacing: 0.05em; }
+    .clause-num-value { font-size: 1.1rem; font-weight: 700; color: #b91c1c; line-height: 1; }
+    .card-body { padding: 1.15rem; }
+    .card-body p { font-size: 0.95rem; line-height: 1.6; color: #0f172a; font-style: italic; }
+    .card-footer { padding: 0.75rem 1.15rem; border-top: 1px dashed #e2e8f0; background: #fcfcfc; text-align: right; }
+    .review-btn { font-size: 0.875rem; color: #2563eb; font-weight: 600; cursor: pointer; padding: 0.375rem 0.75rem; border-radius: 8px; background: none; border: none; }
+    .review-btn:hover { background: #eff6ff; }
+    .empty-clauses { text-align: center; padding: 3rem 1rem; color: #64748b; font-size: 1rem; }
+    """
+
+
 def render_results_view(data: dict):
     """Render the results page — replicates the React ResultsView."""
+    import streamlit.components.v1 as components
 
     total = data["total_clauses"]
     risky = sum(1 for r in data["results"] if r["risk_label"] == 1)
@@ -690,66 +763,83 @@ def render_results_view(data: dict):
         st.markdown(f"""
         <div>
             <h2 style="font-size:1.25rem; color:#0f172a; margin:0;">Analysis Results</h2>
-            <span class="results-filename">{data['filename']}</span>
+            <span style="font-size:0.85rem; color:#94a3b8;">{data['filename']}</span>
         </div>
         """, unsafe_allow_html=True)
     with col_score:
         st.markdown(f"""
-        <div class="risk-score-badge">
-            <span class="label">Total Risk Score</span>
-            <span class="value">{risk_score}</span>
+        <div style="text-align:right; background:linear-gradient(135deg,#2563eb,#60a5fa); padding:0.75rem 1.25rem; border-radius:12px; color:#fff;">
+            <span style="font-size:0.65rem; text-transform:uppercase; letter-spacing:0.05em; opacity:0.85; display:block;">Total Risk Score</span>
+            <span style="font-size:1.75rem; font-weight:700;">{risk_score}</span>
         </div>
         """, unsafe_allow_html=True)
 
     st.markdown("<hr style='margin: 0.5rem 0 1.25rem; border:none; border-top:1px solid #e2e8f0;'>", unsafe_allow_html=True)
 
     # ── Summary Stats ──
-    st.markdown(f"""
-    <div class="stats-row">
-        <div class="stat-card">
-            <div class="stat-label">Total Clauses</div>
-            <div class="stat-value">{total}</div>
+    s1, s2, s3 = st.columns(3)
+    with s1:
+        st.markdown(f"""
+        <div style="background:#fff; border:1px solid #e2e8f0; border-radius:12px; padding:1.25rem; box-shadow:0 1px 2px 0 rgba(0,0,0,0.05);">
+            <div style="font-size:0.75rem; text-transform:uppercase; letter-spacing:0.05em; color:#64748b; font-weight:600; margin-bottom:0.25rem;">Total Clauses</div>
+            <div style="font-size:1.75rem; font-weight:700; color:#0f172a;">{total}</div>
         </div>
-        <div class="stat-card danger">
-            <div class="stat-label">Risky Clauses</div>
-            <div class="stat-value">{risky}</div>
+        """, unsafe_allow_html=True)
+    with s2:
+        st.markdown(f"""
+        <div style="background:#fff; border:1px solid #e2e8f0; border-radius:12px; padding:1.25rem; box-shadow:0 1px 2px 0 rgba(0,0,0,0.05);">
+            <div style="font-size:0.75rem; text-transform:uppercase; letter-spacing:0.05em; color:#64748b; font-weight:600; margin-bottom:0.25rem;">Risky Clauses</div>
+            <div style="font-size:1.75rem; font-weight:700; color:#dc2626;">{risky}</div>
         </div>
-        <div class="stat-card safe">
-            <div class="stat-label">Safe Clauses</div>
-            <div class="stat-value">{safe}</div>
+        """, unsafe_allow_html=True)
+    with s3:
+        st.markdown(f"""
+        <div style="background:#fff; border:1px solid #e2e8f0; border-radius:12px; padding:1.25rem; box-shadow:0 1px 2px 0 rgba(0,0,0,0.05);">
+            <div style="font-size:0.75rem; text-transform:uppercase; letter-spacing:0.05em; color:#64748b; font-weight:600; margin-bottom:0.25rem;">Safe Clauses</div>
+            <div style="font-size:1.75rem; font-weight:700; color:#059669;">{safe}</div>
         </div>
-    </div>
-    """, unsafe_allow_html=True)
+        """, unsafe_allow_html=True)
+
+    st.markdown("<div style='height:1rem'></div>", unsafe_allow_html=True)
 
     # ── Split Layout: Document | Flagged Clauses ──
     left_col, right_col = st.columns([3, 2])
 
-    # LEFT — Document Viewer
-    with left_col:
-        doc_html = '<div class="doc-viewer"><div class="column-title">Document Content</div><div class="doc-body">'
-        for clause in data["results"]:
-            text = clause["clause_text"].replace("<", "&lt;").replace(">", "&gt;")
-            if clause["risk_label"] == 1:
-                doc_html += f'<span class="clause-risky">{text}</span> '
-            else:
-                doc_html += f'<span class="clause-normal">{text}</span> '
-        doc_html += '<div class="doc-footer"><p>End of Document</p></div></div></div>'
-        st.markdown(doc_html, unsafe_allow_html=True)
+    css = _component_css()
 
-    # RIGHT — Flagged Clauses List
+    # LEFT — Document Viewer (rendered inside iframe via components.html)
+    with left_col:
+        doc_body = ""
+        for clause in data["results"]:
+            text = clause["clause_text"].replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+            if clause["risk_label"] == 1:
+                doc_body += f'<span class="clause-risky">{text}</span> '
+            else:
+                doc_body += f'<span class="clause-normal">{text}</span> '
+        doc_body += '<div class="doc-footer"><p>End of Document</p></div>'
+
+        doc_full = f"""
+        <html><head><style>{css}</style></head>
+        <body>
+            <div class="doc-viewer">
+                <div class="column-title">Document Content</div>
+                <div class="doc-body">{doc_body}</div>
+            </div>
+        </body></html>
+        """
+        components.html(doc_full, height=700, scrolling=True)
+
+    # RIGHT — Flagged Clauses List (rendered inside iframe via components.html)
     with right_col:
         flagged = [c for c in data["results"] if c["risk_label"] == 1]
-        cards_html = '<div class="clauses-panel">'
-        cards_html += '<div class="column-title">Flagged Clauses List</div>'
-        cards_html += f'<div class="clauses-list-header"><span class="flagged-count">{len(flagged)} Flagged Clauses</span></div>'
-        cards_html += '<div class="clauses-list-body">'
 
+        cards_body = ""
         if not flagged:
-            cards_html += '<div class="empty-clauses">🎉 No risky clauses detected!</div>'
+            cards_body = '<div class="empty-clauses">🎉 No risky clauses detected!</div>'
         else:
             for clause in flagged:
-                text = clause["clause_text"].replace("<", "&lt;").replace(">", "&gt;")
-                cards_html += f"""
+                text = clause["clause_text"].replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+                cards_body += f"""
                 <div class="clause-card">
                     <div class="card-header">
                         <div class="risk-badge">⚠️ {clause['risk_category']}</div>
@@ -759,7 +849,7 @@ def render_results_view(data: dict):
                         </div>
                     </div>
                     <div class="card-body">
-                        <p>"{text}"</p>
+                        <p>&ldquo;{text}&rdquo;</p>
                     </div>
                     <div class="card-footer">
                         <span class="review-btn">Review Section</span>
@@ -767,8 +857,17 @@ def render_results_view(data: dict):
                 </div>
                 """
 
-        cards_html += '</div></div>'
-        st.markdown(cards_html, unsafe_allow_html=True)
+        cards_full = f"""
+        <html><head><style>{css}</style></head>
+        <body>
+            <div class="clauses-panel">
+                <div class="column-title">Flagged Clauses List</div>
+                <div class="clauses-list-header"><span class="flagged-count">{len(flagged)} FLAGGED CLAUSES</span></div>
+                <div class="clauses-list-body">{cards_body}</div>
+            </div>
+        </body></html>
+        """
+        components.html(cards_full, height=700, scrolling=True)
 
 
 # ══════════════════════════════════════════════════
